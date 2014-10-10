@@ -101,7 +101,7 @@ launcher:
   ld bc,$0003
   ldir
 
-  ; calculate register value from bank number
+  /*
   ld b,a        ; save bank number
   .rept 3       ; A SHL 3
     rlca
@@ -109,8 +109,12 @@ launcher:
   and $60       ; keep bits 6,5
   or b          ; B is less or equal to $0F
   and $63       ; mask everything but bits 6,5,1,0
+  */ ; this was the previous idea, now changed
 
-  ; write value to bankshifting register
+  ; calculate register value from bank number
+  or $C0        ; set the 7th and 8th bit
+
+  ; write the value to the bankshifting register
   ld ($FFFC),a
 
   ; start game!  (back to ROM 0 "bankshifted")
