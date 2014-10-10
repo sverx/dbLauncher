@@ -26,7 +26,7 @@ banks 1
 
 .org $0038
 .section "Interrupt handler" force
-  reti                          ; return from interrupt  (stub)
+  reti                          ; return from interrupt (stub)
 .ends
 
 .org $0066
@@ -34,12 +34,20 @@ banks 1
   retn                          ; return from NMI (stub)
 .ends
 
+
+.SMSTAG  ; it's still not working properly, so we'll place the TMR signature 'by hand'
+
+.org $3FF0
+.section "TMR SEGA" force
+  .db $54,$4D,$52,$20,$53,$45,$47,$41
+.ends
+
 .section "bankshift table" free
 ; table where bankshift values for each game are stored
 ; the 1st game starts at 1
 ; the 2nd after the 1st and so on...
 bankshift_table:
-  ; ******** fill in the correct values! ********
+  ; ******** fill in the correct values HERE! ********
   .db  1,5,9,13
 .ends
 
@@ -103,10 +111,10 @@ launcher:
   and $63       ; mask everything but bits 6,5,1,0
 
   ; write value to bankshifting register
-  ld hl,$FFFC
-  ld (hl),a
+  ld ($FFFC),a
 
-  jp $0000       ; start game!  (back to ROM 0 "bankshifted")
+  ; start game!  (back to ROM 0 "bankshifted")
+  jp $0000
 
 magic_sequence:
   .db $40,$C1,$82
