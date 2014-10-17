@@ -1,11 +1,11 @@
-; sverx's homebrew launcher 0.0.1 ---
+; sverx's homebrew launcher
 ; works (well, should!) with db_elec's homebrew cart
 
 .memorymap
 defaultslot 0
-slotsize $4000 ; ROM
+slotsize $4000 ; ROM (16 KB)
 slot 0 $0000
-slotsize $2000 ; RAM
+slotsize $2000 ; RAM (8 KB)
 slot 1 $c000
 .endme
 
@@ -34,21 +34,18 @@ banks 1
   retn                          ; return from NMI (stub)
 .ends
 
-
-.SMSTAG  ; it's still not working properly, so we'll place the TMR signature 'by hand'
-
-.org $3FF0
-.section "TMR SEGA" force
-  .db $54,$4D,$52,$20,$53,$45,$47,$41
-.ends
+.SDSCTAG 0.01, "dbLauncher","Boot ROM to launch homebrew ROMs in db-elec's SMS cartridge","2014/SVERX"
+; since 2014-10-16 it's working properly even with 16KB ROMs,
+; adding SDSC header (homebrew) and SEGA ROM header ("TMR SEGA"
+; signature, ROM checksum and correct ROMtype/ROMsize byte)
 
 .section "bankshift table" free
 ; table where bankshift values for each game are stored
-; the 1st game starts at 1
+; the 1st game starts at 1 (well, as long as this 'boot' ROM is 16KB only)
 ; the 2nd after the 1st and so on...
 bankshift_table:
   ; ******** fill in the correct values HERE! ********
-  .db  1,5,9,13
+  .db  1,9,17,25
 .ends
 
 .section "main" free
@@ -65,33 +62,29 @@ loop:
 
   cp $01               ; UP=first game selected
   jr nz,+
-  ld hl,bankshift_table
-  ld a,(hl)
+  ld a,(bankshift_table)
   jp launcher_RAM
 
 +:cp $02               ; DOWN=second game selected
   jr nz,+
-  ld hl,bankshift_table+1
-  ld a,(hl)
+  ld a,(bankshift_table+1)
   jp launcher_RAM
 
 +:cp $04               ; LEFT=third game selected
   jr nz,+
-  ld hl,bankshift_table+2
-  ld a,(hl)
+  ld a,(bankshift_table+2)
   jp launcher_RAM
 
 +:cp $08               ; RIGHT=fourth game selected
   jr nz,+
-  ld hl,bankshift_table+3
-  ld a,(hl)
+  ld a,(bankshift_table+3)
   jp launcher_RAM
 
 +:jp loop
 .ends
 
 .section "launcher" free
-; this is the code that launch the homebrew (needs to be copied to RAM!)
+; this is the code that launch the homebrew (needs to be executed from RAM!)
 ; (input) A = bankshift value to set
 launcher:
   ; write 'magic sequence' to activate bank shifting
@@ -100,16 +93,6 @@ launcher:
   ld hl,launcher_RAM+(magic_sequence-launcher)
   ld bc,$0003
   ldir
-
-  /*
-  ld b,a        ; save bank number
-  .rept 3       ; A SHL 3
-    rlca
-  .endr
-  and $60       ; keep bits 6,5
-  or b          ; B is less or equal to $0F
-  and $63       ; mask everything but bits 6,5,1,0
-  */ ; this was the previous idea, now changed
 
   ; calculate register value from bank number
   or $C0        ; set the 7th and 8th bit
@@ -128,6 +111,6 @@ launcher_end:
 .ramsection "RAM" slot 1
   ; launcher_RAM         dsb launcher_end-launcher   ;  here's where the lancher copy goes
   ;                      can't make this here work :|
-  launcher_RAM         dsb 256   ;  here's where the lancher copy goes
+  launcher_RAM         dsb 256 ;  here's where the lancher copy goes
   ;                      256 bytes are surely enough :)
 .ends
