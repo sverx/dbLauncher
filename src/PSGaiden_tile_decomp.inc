@@ -1,6 +1,12 @@
 ; ***** PSGaiden tile decompressor                                *****
 ; ***** by sverx - https://github.com/sverx/PSGaiden_tile_decompr *****
 
+; ******************* THIS IS A MODIFIED VERSION! *********************
+; - RAM is in SLOT 1 instead of slot 3
+; - interrupt safe (DI/EI around setting VRAM address)
+; - screen redraw safe (at least 28 cycles between writes to VDP)
+; *********************************************************************
+
 ; function entrypoint is at PSGaiden_tile_decompr
 ;  so to use it, you have to do:
 ;     ld hl,compressed_tiles       ; - set source address
@@ -162,8 +168,11 @@ typeC_proc:
 
 PSGaiden_tile_decompr:                  ; ******** procedure entry point *************
    ld c,$bf                             ; set VRAM address
-   out (c),e
-   out (c),d
+   di                                   ; make set VRAM address interrupt safe
+   out (c),e               ; 12
+   nop                     ;  4
+   out (c),d               ; 12
+   ei                      ;   = 28 cycles = VRAM SAFE even during screen redraw!
 
    ld c,(hl)                            ; BC = number of tiles
    inc hl
@@ -222,18 +231,18 @@ _WriteVRAM:                             ; now loopless!
        ld bc,-8*3+1                     ; after each group of 4 bytes, go back this amount
        ld de,8                          ; each byte is 8 byte apart
        .rept 8 index k
-         .rept 4 index n
-           ld a,(hl)
-           out ($be),a                  ; write to vram 4 bytes
+         .rept 4 index n      ; cycles
+           ld a,(hl)          ; 7
+           out ($be),a        ; 11      ; write to vram 4 bytes
            .if n != 3
-             add hl,de                  ; we don't need this the last time
+             add hl,de        ; 11      ; we don't need this the last time
            .endif
          .endr
          .if k != 7
-           add hl,bc                    ; go back for next run, if it's not the last
+           add hl,bc          ; 11      ; go back for next run, if it's not the last
          .endif
        .endr
-     pop hl
+     pop hl                   ; 7+11+11=29 cycles = VRAM SAFE even during screen redraw!
 
    pop bc
    dec bc                               ; more tiles?

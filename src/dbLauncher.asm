@@ -1,6 +1,7 @@
 ; sverx's homebrew launcher
-; works (well, should!) with db_elec's homebrew cart
+; works (...well, let's see!) with db_elec's homebrew cart
 
+; memory map / rom banks / etc
 .memorymap
 defaultslot 0
 slotsize $4000 ; ROM (16 KB)
@@ -8,21 +9,67 @@ slot 0 $0000
 slotsize $2000 ; RAM (8 KB)
 slot 1 $c000
 .endme
-
 .rombankmap
 bankstotal 1
 banksize $4000
 banks 1
 .endro
-
 .bank 0 slot 0
+
+; you shouldn't modify anything above this line, theoretically...
+; *********************************************************************************
+
+.define NUMBER_OF_GAMES                2     ; change this if needed!
+
+.section "cover assets" free
+cover_assets:
+  ; ONE line for EACH game - each line has 4 pointers: tiles(*), tilemap, palette, UNUSED
+  ; (*) tiles are PSGaiden compressed
+  .dw game1_tiles, game1_tilemap, game1_palette, $0000
+  .dw game2_tiles, game2_tilemap, game2_palette, $0000
+
+  ; put the assets wherever you want ;)
+  game1_tiles:
+  .incbin "inc/game1 (tiles).psgcompr"
+  game1_tilemap:
+  .incbin "inc/game1 (tilemap).bin"
+  game1_palette:
+  .incbin "inc/game1 (palette).bin"
+
+  game2_tiles:
+  .incbin "inc/game2 (tiles).psgcompr"
+  game2_tilemap:
+  .incbin "inc/game2 (tilemap).bin"
+  game2_palette:
+  .incbin "inc/game2 (palette).bin"
+.ends
+
+.section "bankshift table" free
+; table where bankshift values for each game are stored
+; the 1st game starts at 1 (well, as long as this 'boot' ROM is 16KB only)
+; the 2nd after the 1st and so on...
+bankshift_table:
+  .db  1,9,17,25            ; ******** fill in the correct values HERE! ********
+.ends
+
+; modify SDSCTAG with the details of your collection! :)
+.SDSCTAG 0.15, "dbLauncher","Boot ROM to launch homebrew ROMs in db-elec's SMS cartridge","2014/SVERX"
+; since 2014-10-16 WLA-DX it's working properly even with 16KB ROMs,
+; adding SDSC header (homebrew) and SEGA ROM header ("TMR SEGA"
+; signature, ROM checksum and correct ROMtype/ROMsize byte)
+
+
+; *********************************************************************************
+; you shouldn't modify anything below this line, theoretically...
+
 .org $0000                      ; this goes at ROM address 0 (boot)
 .section "Startup" force
   di                            ; disable interrupt
   im 1                          ; interrupt mode 1 (this won't change)
   ld sp, $dff0                  ; set stack pointer at end of RAM
+  xor a
+  ld ($FFFD),a                  ; set BANK 0 to $00 - enough for 16KB
   jp main                       ; run main
-                                ; (no mapper mode initializazion needed here!)
 .ends
 
 .org $0038
@@ -41,37 +88,18 @@ banks 1
   retn                          ; return from NMI (stub)
 .ends
 
-.SDSCTAG 0.11, "dbLauncher","Boot ROM to launch homebrew ROMs in db-elec's SMS cartridge","2014/SVERX"
-; since 2014-10-16 WLA-DX it's working properly even with 16KB ROMs,
-; adding SDSC header (homebrew) and SEGA ROM header ("TMR SEGA"
-; signature, ROM checksum and correct ROMtype/ROMsize byte)
-
 .include "base.inc"
 .include "vdp.inc"
 .include "PSGaiden_tile_decomp.inc"
 
-; ******** ASSETS ********
+; ******** fixed ASSETS ********
 .section "assets" free
-multicart_tiles:
-.incbin "inc/multicart (tiles).psgcompr"
-multicart_tilemap:
-.incbin "inc/multicart (tilemap).bin"
-multicart_palette:
-.incbin "inc/multicart (palette).bin"
-arrow_tiles:
-.incbin "inc/arrow (tiles).psgcompr"
-arrow_palette:
-.incbin "inc/arrow (palette).bin"
-.ends
-
-
-.section "bankshift table" free
-; table where bankshift values for each game are stored
-; the 1st game starts at 1 (well, as long as this 'boot' ROM is 16KB only)
-; the 2nd after the 1st and so on...
-bankshift_table:
-  ; ******** fill in the correct values HERE! ********
-  .db  1,9,17,25
+  headfoot_tiles:
+  .incbin "inc/headfoot (tiles).psgcompr"
+  headfoot_tilemap:
+  .include "inc/headfoot (tilemap).inc"
+  headfoot_palette:
+  .incbin "inc/headfoot (palette).bin"
 .ends
 
 .section "turnOnVideo" free
@@ -86,6 +114,18 @@ turnOffVideo:
   SETVDPREGSANDRET VDPReg1_Mode|$00
 .ends
 
+.section "ZeroBGPalette" free
+ZeroBGPalette:
+  SetVDPAddress BackgroundPaletteAddress
+  ld c,VDPDataPort
+  xor a
+  ld b,16
+-:out (c),a              ; 12
+  nop                    ;  4
+  djnz -                 ; 13
+  ret                    ;   = 29 = SAFE
+.ends
+
 .section "waitForVBlank" free
 waitForVBlank:
   xor a
@@ -96,6 +136,63 @@ waitForVBlank:
   xor a
   ld (VBlankFlag),a
   ret
+.ends
+
+.section "setcover" free
+  ; sets the selected game cover, using "WhichGame"
+setcover:
+  call ZeroBGPalette
+
+  ld hl,cover_assets             ; tiles of game
+  ld a,(WhichGame)
+  ASLA 3
+  ADDHLA
+  ld a,(hl)
+  inc hl
+  ld h,(hl)
+  ld l,a
+  ld de,$0000|$4000              ; from VRAM $0000
+  call PSGaiden_tile_decompr
+
+  call waitForVBlank       ; wait until VBlank starts
+
+  SetVDPAddress $3800+32*2|$4000 ; second line from top
+  ld hl,cover_assets+2          ; tilemap of game
+  ld a,(WhichGame)
+  ASLA 3
+  ADDHLA
+  ld a,(hl)
+  inc hl
+  ld h,(hl)
+  ld l,a
+  ld c,VDPDataPort
+
+                                 ; write 1st half of tilemap
+  ld b,0                         ; 0 = 256 bytes
+  otir
+  otir
+  ld b,704-512
+  otir
+
+  call waitForVBlank       ; wait until VBlank starts
+
+                                 ; write 2nd half of tilemap
+  ld c,VDPDataPort
+  ld b,0                         ; 0 = 256 bytes
+  otir
+  otir
+  ld b,704-512
+  otir
+
+  ld hl,cover_assets+4           ; palette of game
+  ld a,(WhichGame)
+  ASLA 3
+  ADDHLA
+  ld a,(hl)
+  inc hl
+  ld h,(hl)
+  ld l,a
+  jp WriteBGPalette              ; tail call optimizazion
 .ends
 
 .section "main" free
@@ -110,98 +207,68 @@ main:
   call SetMode4Default
   
   ; load assets (tiles/tilemap/palette) in VRAM
-  ld hl,multicart_tiles
-  ld de,$0000|$4000              ; from VRAM $0000
+  ld hl,headfoot_tiles
+  ld de,$3000|$4000              ; from VRAM $3000          /* FIX ME */
   call PSGaiden_tile_decompr
-
-  ld hl,arrow_tiles
-  ld de,$2000|$4000              ; from VRAM $2000 (sprites)
-  call PSGaiden_tile_decompr
-
-  SetVDPAddress $3800|$4000
-  ld hl,multicart_tilemap
+  
+  SetVDPAddress $3800|$4000      ; top of screen
+  ld hl,headfoot_tilemap
   ld c,VDPDataPort
-  ld b,0                         ; 0 = 256 bytes
-  .rept 6                        ; 6 times 256 bytes = 32*24*2 = whole map
-    otir
-  .endr
+  ld b,32*2
+  otir                           ; copy 64 bytes (one row)
+
+  SetVDPAddress $3800+23*32*2|$4000   ; bottom of screen
+  ld hl,headfoot_tilemap+32*2
+  ld c,VDPDataPort
+  ld b,32*2
+  otir                           ; copy 64 bytes (one row)
   
-  ld hl,arrow_palette
+  ld hl,headfoot_palette
   call WriteSpritePalette
-
-  ld hl,multicart_palette
-  call WriteSpritePalette_zerocolor
-
-  ld hl,multicart_palette
-  call WriteBGPalette
   
-  ; set sprite info
+  ; set sprite info (no sprites please!)
   SetVDPAddress $3F00|$4000
   ld c,VDPDataPort
-  ld a,110                 ; sprite Y
+  ld a,$D0
   out (c),a
-  out (c),a
-  ld a,$D0                 ; no more sprites
-  out (c),a
-
-  SetVDPAddress $3F00+128|$4000
-  ld c,VDPDataPort
-  ld a,128-8               ; sprite X
-  out (c),a
-  ld a,0                   ; tile 0
-  out (c),a
-  ld a,128-8+8             ; sprite X
-  out (c),a
-  ld a,2                   ; tile 0
-  out (c),a
-
+  
   call turnOnVideo
   ei
-  
+
   xor a
   ld (WhichGame),a         ; selected game = 0
-  
-loop:
+
+  call setcover
+
+_loop:
   call waitForVBlank       ; wait until VBlank starts
-
-  ; update sprite
-  SetVDPAddress $3F00+128+1|$4000
-  ld c,VDPDataPort
-  ld a,(WhichGame)
-  ASLA 2
-  out (c),a
-
-  SetVDPAddress $3F00+128+3|$4000
-  ld c,VDPDataPort
-  ld a,(WhichGame)
-  ASLA 2
-  inc a
-  inc a
-  out (c),a
 
   in a,($dc)           ; read pad
   cpl                  ; A = ~A
 
-  cp $01               ; UP=first game selected
++:cp $04               ; LEFT=decrease game selected (wrapping)
   jr nz,+
-  ld a,0
+  ld a,(WhichGame)
+  sub 1                ; dec a doesn't set carry...
+  jp nc,_nowrapleft
+  ld a,NUMBER_OF_GAMES-1   ; select LAST game
+_nowrapleft:
   ld (WhichGame),a
+  call setcover
+  jp _loop
 
-+:cp $02               ; DOWN=second game selected
++:cp $08               ; RIGHT=increase game selected (wrapping)
   jr nz,+
-  ld a,1
+  ld a,(WhichGame)
+  inc a
+  cp NUMBER_OF_GAMES
+  jr nz,_nowraprigth
+  xor a                ; select FIRST game
+_nowraprigth:
   ld (WhichGame),a
+  call setcover
+  jp _loop
 
-+:cp $04               ; LEFT=third game selected
-  jr nz,+
-  ld a,2
-  ld (WhichGame),a
-
-+:cp $08               ; RIGHT=fourth game selected
-  jr nz,+
-  ld a,3
-  ld (WhichGame),a
-  
 +:cp $10               ; START!
   jr nz,+
   call turnOffVideo
@@ -211,7 +278,7 @@ loop:
   ld a,(hl)
   jp launcher_RAM
 
-+:jp loop
++:jp _loop
 .ends
 
 .section "launcher" free
