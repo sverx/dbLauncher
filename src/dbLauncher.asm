@@ -242,9 +242,15 @@ main:
 
 _loop:
   call waitForVBlank       ; wait until VBlank starts
-
+  
   in a,($dc)           ; read pad
   cpl                  ; A = ~A
+  ld b,a               ; B = current pad status
+  ld hl,PadStatus
+  ld a,(hl)            ; A = previous pad status
+  cpl                  ; A = ~A
+  and b                ; A = current pad status AND NOT PadStatus (so ones are only where it was 0 before)
+  ld (hl),b            ; save new pad status
 
 +:cp $04               ; LEFT=decrease game selected (wrapping)
   jr nz,+
@@ -308,6 +314,7 @@ launcher_end:
 
 .ramsection "RAM" slot 1
   VBlankFlag      db      ;  the flag for VBlank
+  PadStatus       db      ;  the pad status
   WhichGame       db      ;  which game
   launcher_RAM    dsb 256 ;  here's where the launcher copy goes
                           ;  256 bytes are surely enough :)
