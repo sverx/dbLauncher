@@ -92,6 +92,16 @@ bankshift_table:
 .include "vdp.inc"
 .include "PSGaiden_tile_decomp.inc"
 
+.macro SetVDPAddress_SAFE args addr
+  ; - interrupt safe (DI/EI around setting VRAM address)
+  ld a,<addr
+  di
+  out (VDPControlPort),a
+  ld a,>addr
+  out (VDPControlPort),a
+  ei
+.endm
+
 ; ******** fixed ASSETS ********
 .section "assets" free
   headfoot_tiles:
@@ -114,9 +124,10 @@ turnOffVideo:
   SETVDPREGSANDRET VDPReg1_Mode|$00
 .ends
 
-.section "ZeroBGPalette" free
-ZeroBGPalette:
-  SetVDPAddress BackgroundPaletteAddress
+.section "ZeroBGPalette_SAFE" free
+ZeroBGPalette_SAFE:
+  ; zero out BG palette (VRAM safe)
+  SetVDPAddress_SAFE BackgroundPaletteAddress
   ld c,VDPDataPort
   xor a
   ld b,16
@@ -124,6 +135,17 @@ ZeroBGPalette:
   nop                    ;  4
   djnz -                 ; 13
   ret                    ;   = 29 = SAFE
+.ends
+
+.section "WriteBGPalette_SAFE" free
+WriteBGPalette_SAFE:
+  ; writes provided (hl) to the BG palette (VRAM safe)
+  SetVDPAddress_SAFE BackgroundPaletteAddress
+  ld c,VDPDataPort
+  ld b,16
+-:outi                    ; 16
+  jr nz,-                 ; 12 = 28 = SAFE
+  ret
 .ends
 
 .section "waitForVBlank" free
@@ -138,10 +160,17 @@ waitForVBlank:
   ret
 .ends
 
+.macro OTIR_SAFE
+-:outi                   ; 16                 16
+  jr nz,-                ; 12 = 28 = SAFE
+                         ;                     7
+  nop                    ;                     4 = 27 = SAFE
+.endm
+
 .section "setcover" free
   ; sets the selected game cover, using "WhichGame"
 setcover:
-  call ZeroBGPalette
+  call ZeroBGPalette_SAFE
 
   ld hl,cover_assets             ; tiles of game
   ld a,(WhichGame)
@@ -154,9 +183,9 @@ setcover:
   ld de,$0000|$4000              ; from VRAM $0000
   call PSGaiden_tile_decompr
 
-  call waitForVBlank       ; wait until VBlank starts
+;  call waitForVBlank       ; wait until VBlank starts
 
-  SetVDPAddress $3800+32*2|$4000 ; second line from top
+  SetVDPAddress_SAFE $3800+32*2|$4000 ; second line from top
   ld hl,cover_assets+2          ; tilemap of game
   ld a,(WhichGame)
   ASLA 3
@@ -167,22 +196,15 @@ setcover:
   ld l,a
   ld c,VDPDataPort
 
-                                 ; write 1st half of tilemap
+                                 ; write tilemap
   ld b,0                         ; 0 = 256 bytes
-  otir
-  otir
-  ld b,704-512
-  otir
-
-  call waitForVBlank       ; wait until VBlank starts
-
-                                 ; write 2nd half of tilemap
-  ld c,VDPDataPort
-  ld b,0                         ; 0 = 256 bytes
-  otir
-  otir
-  ld b,704-512
-  otir
+  OTIR_SAFE
+  OTIR_SAFE
+  OTIR_SAFE
+  OTIR_SAFE
+  OTIR_SAFE
+  ld b,256-32*2*2
+  OTIR_SAFE
 
   ld hl,cover_assets+4           ; palette of game
   ld a,(WhichGame)
@@ -192,7 +214,7 @@ setcover:
   inc hl
   ld h,(hl)
   ld l,a
-  jp WriteBGPalette              ; tail call optimizazion
+  jp WriteBGPalette_SAFE   ; TO DO      ; tail call optimizazion
 .ends
 
 .section "main" free
@@ -211,13 +233,13 @@ main:
   ld de,$3000|$4000              ; from VRAM $3000          /* FIX ME */
   call PSGaiden_tile_decompr
   
-  SetVDPAddress $3800|$4000      ; top of screen
+  SetVDPAddress_SAFE $3800|$4000      ; top of screen
   ld hl,headfoot_tilemap
   ld c,VDPDataPort
   ld b,32*2
   otir                           ; copy 64 bytes (one row)
 
-  SetVDPAddress $3800+23*32*2|$4000   ; bottom of screen
+  SetVDPAddress_SAFE $3800+23*32*2|$4000   ; bottom of screen
   ld hl,headfoot_tilemap+32*2
   ld c,VDPDataPort
   ld b,32*2
@@ -227,7 +249,7 @@ main:
   call WriteSpritePalette
   
   ; set sprite info (no sprites please!)
-  SetVDPAddress $3F00|$4000
+  SetVDPAddress_SAFE $3F00|$4000
   ld c,VDPDataPort
   ld a,$D0
   out (c),a

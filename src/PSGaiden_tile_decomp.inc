@@ -4,7 +4,7 @@
 ; ******************* THIS IS A MODIFIED VERSION! *********************
 ; - RAM is in SLOT 1 instead of slot 3
 ; - interrupt safe (DI/EI around setting VRAM address)
-; - screen redraw safe (at least 28 cycles between writes to VDP)
+; - screen redraw safe (at least 28 cycles between writes to VDPDataPort)
 ; *********************************************************************
 
 ; function entrypoint is at PSGaiden_tile_decompr
@@ -169,10 +169,9 @@ typeC_proc:
 PSGaiden_tile_decompr:                  ; ******** procedure entry point *************
    ld c,$bf                             ; set VRAM address
    di                                   ; make set VRAM address interrupt safe
-   out (c),e               ; 12
-   nop                     ;  4
-   out (c),d               ; 12
-   ei                      ;   = 28 cycles = VRAM SAFE even during screen redraw!
+   out (c),e
+   out (c),d
+   ei
 
    ld c,(hl)                            ; BC = number of tiles
    inc hl
@@ -219,11 +218,11 @@ _RawData:
         ldi                             ; copy the raw 8 bytes to (DE)
      .endr
      pop bc                             ; restore BC
-     ; fallback to _BitplaneDone
+     ; fallthru to _BitplaneDone
 
 _BitplaneDone:
      djnz _BitplaneLoop
-     ; tile is complete - ; fallback to _WriteVRAM
+     ; tile is complete - ; fallthru to _WriteVRAM
 
 _WriteVRAM:                             ; now loopless!
      push hl
